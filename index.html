@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Objection Response Picker</title>
+
+  <!-- PWA: Manifest -->
+  <link rel="manifest" href="manifest.webmanifest">
+
+  <!-- iOS PWA support -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Objections">
+  <!-- You should add a real icon file named apple-touch-icon.png (180x180) in same folder -->
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+
+  <!-- Optional: Helps reduce iOS zoom on input focus -->
+  <style>
+    input, select, textarea { font-size: 16px; }
+  </style>
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      margin: 24px;
+      max-width: 980px;
+    }
+    h1 { margin: 0 0 10px; }
+    label { font-weight: 600; display:block; margin: 14px 0 8px; }
+    input, select, button { padding: 10px 12px; font-size: 16px; }
+    input, select { width: 100%; }
+    textarea {
+      width: 100%;
+      min-height: 280px;
+      padding: 12px;
+      font-size: 15px;
+      line-height: 1.35;
+    }
+    .hint { color: #555; margin-top: 8px; }
+    .pill {
+      display:inline-block;
+      padding: 2px 10px;
+      border:1px solid #ddd;
+      border-radius: 999px;
+      font-size: 12px;
+      color:#333;
+      margin-left: 8px;
+    }
+    .topbar {
+      display:flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .status { font-size: 13px; color:#0a6; }
+    .status.bad { color:#a00; }
+    .footer { margin-top: 14px; font-size: 13px; color:#666; }
+    .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 820px){ .grid2 { grid-template-columns: 1fr; } }
+
+    /* Toggle */
+    .toggleWrap { display:flex; align-items:center; gap:10px; margin-top: 6px; }
+    .toggleLabel { font-size: 14px; color:#333; min-width: 42px; text-align:right; }
+    .switch { position: relative; width: 56px; height: 32px; display:inline-block; }
+    .switch input { display:none; }
+    .slider {
+      position:absolute;
+      cursor:pointer;
+      inset:0;
+      background:#ddd;
+      border-radius:999px;
+      transition: .2s;
+    }
+    .slider:before {
+      content:"";
+      position:absolute;
+      width:26px;
+      height:26px;
+      left:3px;
+      top:3px;
+      background:#fff;
+      border-radius:50%;
+      transition: .2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,.25);
+    }
+    .switch input:checked + .slider { background:#b9d7ff; }
+    .switch input:checked + .slider:before { transform: translateX(24px); }
+
+    .rowActions {
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+    button { cursor:pointer; }
+
+    /* Small iPhone polish */
+    @media (max-width: 420px){
+      body { margin: 16px; }
+      textarea { min-height: 240px; }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="topbar">
+    <div>
+      <h1>Objection Response Picker <span class="pill">PWA</span></h1>
+      <div class="hint">Search, pick an objection, toggle Call vs Text, copy and send.</div>
+    </div>
+    <div id="status" class="status"></div>
+  </div>
+
+  <div class="grid2">
+    <div>
+      <label for="search">Search objections</label>
+      <input id="search" type="text" placeholder="Type to filter… busy, afford, mail, work insurance" />
+    </div>
+
+    <div>
+      <label>Mode</label>
+      <div class="toggleWrap">
+        <div class="toggleLabel">Call</div>
+        <label class="switch">
+          <input id="modeToggle" type="checkbox" />
+          <span class="slider"></span>
+        </label>
+        <div class="toggleLabel">Text</div>
+      </div>
+      <div class="hint" id="modeHint">Call mode shows full script.</div>
+    </div>
+  </div>
+
+  <label for="objection">Objection</label>
+  <div class="rowActions">
+    <select id="objection"></select>
+    <button id="copyBtn" type="button">Copy</button>
+    <button id="clearBtn" type="button">Clear</button>
+  </div>
+
+  <label for="response">Response</label>
+  <textarea id="response" readonly></textarea>
+
+  <div class="footer">
+    Weekday close baked in. Works offline once installed.
+  </div>
+
+<script>
+/* ============================
+   PWA: Service Worker Register
+   ============================ */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
+  });
+}
+
+/* ============================
+   CONFIG – TEXT MODE (MEDIUM)
+   ============================ */
+const TEXT_PREFIX = "Quick question";
+
+const TEXT_BOOKING_CLOSE_MEDIUM =
+`If you’re open to it, I can knock this out in 10–15 minutes.
+Weekdays work best for me. What’s better for you: 6:00pm or 6:30pm?`;
+
+/* ============================
+   DATA – CALL SCRIPTS
+   ============================ */
+const OBJECTIONS = [
+  {
+    key: "Already taken care of",
+    call:
+`That’s why I’m calling. Take me back to when you filled these forms out.
+Most people were either shopping for the best option or looking for something different.
+Which one was it for you?`
+  },
+  {
+    key: "I’m too busy / don’t have time",
+    call:
+`That’s why I’m calling. Most people who filled this out were trying to remove financial stress from their family.
+Is that what you were looking to do, or was it something different?`
+  },
+  {
+    key: "I’m not interested",
+    call:
+`I hear you. Just so I don’t misread it, when you filled this out were you shopping for coverage,
+or looking for something completely different?`
+  },
+  {
+    key: "Can’t afford it / too expensive",
+    call:
+`That’s why I’m calling. It sounds like someone showed you something that didn’t fit your budget.
+My job is to help find something that actually makes sense financially.`
+  },
+  {
+    key: "Send it in the mail",
+    call:
+`I can do that, but before I send anything, I want to be sure I understand what you were trying to accomplish.
+Were you shopping for the best option, or looking for something different?`
+  },
+  {
+    key: "Already bought insurance",
+    call:
+`Got it. Have they already issued the policy and started drafting,
+or is it still pending right now?`
+  }
+];
+
+/* ============================
+   HELPERS
+   ============================ */
+const $ = id => document.getElementById(id);
+const searchInput = $("search");
+const modeToggle = $("modeToggle");
+const modeHint = $("modeHint");
+const objectionSel = $("objection");
+const responseBox = $("response");
+const status = $("status");
+
+function normalize(s){ return (s || "").toLowerCase(); }
+
+function setStatus(msg, bad=false){
+  status.textContent = msg;
+  status.className = bad ? "status bad" : "status";
+  setTimeout(() => status.textContent = "", 1500);
+}
+
+function isTextMode(){ return modeToggle.checked; }
+
+/* ============================
+   TEXT MODE BUILDER (MEDIUM)
+   ============================ */
+function toTextVersion(callScript){
+  let s = (callScript || "").replace(/\(.*?\)/g, "").trim();
+  const lower = s.toLowerCase();
+
+  let clarifier = "When you originally looked into this, were you shopping for the best option or something different?";
+  if (lower.includes("busy")) clarifier = "Before I close this out, were you shopping or looking for something different?";
+  if (lower.includes("afford") || lower.includes("budget")) clarifier = "Would it help to see options that actually fit your budget?";
+  if (lower.includes("already") && lower.includes("policy")) clarifier = "Has the policy already been issued or is it still pending?";
+
+  return `${TEXT_PREFIX}:\n\n${s}\n\n${clarifier}\n\n${TEXT_BOOKING_CLOSE_MEDIUM}`.trim();
+}
+
+/* ============================
+   FILTER + RENDER
+   ============================ */
+let filtered = [...OBJECTIONS];
+
+function rebuildDropdown(){
+  objectionSel.innerHTML = "";
+  const opt = document.createElement("option");
+  opt.value = "";
+  opt.textContent = filtered.length ? "Select an objection…" : "No matches";
+  objectionSel.appendChild(opt);
+
+  filtered.forEach((o, i) => {
+    const option = document.createElement("option");
+    option.value = String(i);
+    option.textContent = o.key;
+    objectionSel.appendChild(option);
+  });
+
+  responseBox.value = "";
+}
+
+function applyFilter(){
+  const q = normalize(searchInput.value);
+  filtered = OBJECTIONS.filter(o => normalize(o.key).includes(q) || normalize(o.call).includes(q));
+  rebuildDropdown();
+}
+
+function renderSelected(){
+  const v = objectionSel.value;
+  if (!v) { responseBox.value = ""; return; }
+  const item = filtered[Number(v)];
+  responseBox.value = isTextMode() ? toTextVersion(item.call) : item.call;
+}
+
+function updateMode(){
+  modeHint.textContent = isTextMode()
+    ? "Text mode shows a medium-length SMS."
+    : "Call mode shows full script.";
+  renderSelected();
+}
+
+/* ============================
+   ACTIONS
+   ============================ */
+$("copyBtn").onclick = async () => {
+  const text = (responseBox.value || "").trim();
+  if (!text) return setStatus("Select an objection first", true);
+
+  try {
+    await navigator.clipboard.writeText(text);
+    setStatus("Copied");
+  } catch {
+    responseBox.focus();
+    responseBox.select();
+    document.execCommand("copy");
+    setStatus("Copied");
+  }
+};
+
+$("clearBtn").onclick = () => {
+  searchInput.value = "";
+  filtered = [...OBJECTIONS];
+  rebuildDropdown();
+  setStatus("Cleared");
+};
+
+/* ============================
+   EVENTS + INIT
+   ============================ */
+searchInput.oninput = applyFilter;
+objectionSel.onchange = renderSelected;
+modeToggle.onchange = updateMode;
+
+rebuildDropdown();
+updateMode();
+</script>
+
+</body>
+</html>
